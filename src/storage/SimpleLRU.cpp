@@ -44,6 +44,7 @@ bool SimpleLRU::Set(const std::string &key, const std::string &value) {
         push(key, search.value);
         return false;
     }
+
     return true;
 }
 
@@ -71,7 +72,10 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
     value = search.value;
 
     pop(search);
-    push(key, value);
+    if (!push(key, value)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -89,20 +93,18 @@ bool SimpleLRU::push(const std::string &key, const std::string &value) {
         return false;
     }
 
-    if (!_lru_head) {
+    if (!_lru_tail) {
         _lru_head.reset(new_node);
+        _lru_tail = new_node;
     }
     else {
-        auto *tail = _lru_head.get();
-        while (tail->next) {
-            tail = tail->next.get();
-        }
-        tail->next.reset(new_node);
-        new_node->prev = tail;
+        _lru_tail->next.reset(new_node);
+        new_node->prev = _lru_tail;
+        _lru_tail = new_node;
     }
 
     _lru_index.insert({key, std::ref(*new_node)});
-    _curr_size += (key.size() + value.size());
+    _curr_size += key.size() + value.size();
 
     return true;
 }
@@ -119,6 +121,9 @@ bool SimpleLRU::pop(lru_node& node) {
             node.next->prev = nullptr;
         }
     }
+    else {
+        _lru_tail = node.prev;
+    }
 
     if (node.prev) {
         if (node.next)
@@ -126,15 +131,7 @@ bool SimpleLRU::pop(lru_node& node) {
         else
             node.prev->next.reset();
     }
-    // else {
-    // 	if (node.next) {
-    // 		_lru_head = std::move(node.next);
-    // 	}
-    // 	else {
-    // 		_lru_head.reset();
-    // 	}
-    // }
-
+    
     return true;
 }
 

@@ -20,20 +20,16 @@ class SimpleLRU : public Afina::Storage {
 public:
     SimpleLRU(size_t max_size = 1024) : _max_size(max_size) {
         _lru_head.reset();
+        _lru_tail = nullptr;
         _curr_size = 0;
     }
 
     ~SimpleLRU() {
         _lru_index.clear();
 
-        auto* tail = _lru_head.get();
-        while (tail && tail->next) {
-            tail = tail->next.get();
-        }
-
-        while (tail) {
-            tail->next.reset();
-            tail = tail->prev;
+        while (_lru_tail) {
+            _lru_tail->next.reset();
+            _lru_tail = _lru_tail->prev;
         }
 
         _lru_head.reset(); // TODO: Here is stack overflow
@@ -73,6 +69,7 @@ private:
     //
     // List owns all nodes
     std::unique_ptr<lru_node> _lru_head;
+    lru_node* _lru_tail;
 
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
     std::map<std::string, std::reference_wrapper<lru_node>, std::less<std::string>> _lru_index;
