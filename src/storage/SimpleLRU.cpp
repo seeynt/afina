@@ -10,8 +10,9 @@ bool SimpleLRU::Put(const std::string &key, const std::string &value) {
         pop(it->second.get());
     }
 
-    if (!push(key, value))
+    if (!push(key, value)) {
         return false;
+    }
 
     return true;
 }
@@ -85,6 +86,8 @@ bool SimpleLRU::push(const std::string &key, const std::string &value) {
     }
 
     while (_lru_head && _curr_size + key.size() + value.size() > _max_size) {
+        auto k = _lru_head->key;
+        auto val = _lru_head->value;
         pop(*_lru_head.get());
     }
 
@@ -126,10 +129,20 @@ bool SimpleLRU::pop(lru_node& node) {
     }
 
     if (node.prev) {
-        if (node.next)
+        if (node.next) {
             node.prev->next = std::move(node.next);
-        else
+        }
+        else {
             node.prev->next.reset();
+        }
+    }
+    else {
+        if (node.next) {
+            _lru_head = std::move(node.next);
+        }
+        else {
+            _lru_head.reset();
+        }
     }
     
     return true;
