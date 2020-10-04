@@ -115,7 +115,7 @@ bool SimpleLRU::_push(const std::string &key, const std::string &value) {
         _lru_tail = new_node;
     }
 
-    _lru_index.insert({std::ref(key), std::ref(*new_node)});
+    _lru_index.insert({new_node->key, *new_node});
     _curr_size += node_size;
 
     return true;
