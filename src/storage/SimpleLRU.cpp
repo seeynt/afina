@@ -5,46 +5,62 @@ namespace Backend {
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Put(const std::string &key, const std::string &value) {
-    auto it = _lru_index.find(key);
-    if (it != _lru_index.end()) {
-        pop(it->second.get());
-    }
-
-    if (!push(key, value)) {
+    if (key.size() + value.size() > _max_size) {
         return false;
     }
+
+    auto it = _lru_index.find(key);
+    if (it == _lru_index.end()) {
+        return _push(key, value);
+    }
+
+    auto& search = it->second.get();
+    _push(search);
+
+    while (_lru_head && _curr_size + value.size() - search.value.size() > _max_size) {
+        _pop(*_lru_head.get());
+    }
+
+    search.value = value;
+    _curr_size += value.size() - search.value.size();
 
     return true;
 }
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
-    auto it = _lru_index.find(key);
-    if (it == _lru_index.end()) {
-        if (!push(key, value)) {
-            return false;
-        }
-    }
-    else {
+    if (key.size() + value.size() > _max_size) {
         return false;
     }
 
-    return true;
+    auto it = _lru_index.find(key);
+    if (it == _lru_index.end()) {
+        return _push(key, value);
+    }
+
+    return false;
 }
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Set(const std::string &key, const std::string &value) {
+    if (key.size() + value.size() > _max_size) {
+        return false;
+    }
+
     auto it = _lru_index.find(key);
     if (it == _lru_index.end()) {
         return false;
     }
 
     auto& search = it->second.get();
-    pop(search);
-    if (!push(key, value)) {
-        push(key, search.value);
-        return false;
+    _push(search);
+
+    while (_lru_head && _curr_size + value.size() - search.value.size() > _max_size) {
+        _pop(*_lru_head.get());
     }
+
+    search.value = value;
+    _curr_size += value.size() - search.value.size();
 
     return true;
 }
@@ -57,7 +73,7 @@ bool SimpleLRU::Delete(const std::string &key) {
     }
 
     auto& search = it->second.get();
-    pop(search);
+    _pop(search);
 
     return true;
 }
@@ -72,28 +88,21 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
     auto& search = it->second.get();
     value = search.value;
 
-    pop(search);
-    if (!push(key, value)) {
-        return false;
-    }
+    _push(search);
 
     return true;
 }
 
-bool SimpleLRU::push(const std::string &key, const std::string &value) {
-    if (key.size() + value.size() > _max_size) {
-        return false;
+bool SimpleLRU::_push(const std::string &key, const std::string &value) {
+    std::size_t node_size = key.size() + value.size();
+
+    while (_lru_head && _curr_size + node_size > _max_size) {
+        _pop(*_lru_head.get());
     }
 
-    while (_lru_head && _curr_size + key.size() + value.size() > _max_size) {
-        auto k = _lru_head->key;
-        auto val = _lru_head->value;
-        pop(*_lru_head.get());
-    }
-
-    auto* new_node = new lru_node{key, value, nullptr, nullptr};
+    auto new_node = new lru_node{key, value, nullptr, nullptr};
     if (!new_node) {
-        return false;
+        throw std::bad_alloc();
     }
 
     if (!_lru_tail) {
@@ -106,23 +115,44 @@ bool SimpleLRU::push(const std::string &key, const std::string &value) {
         _lru_tail = new_node;
     }
 
-    _lru_index.insert({key, std::ref(*new_node)});
-    _curr_size += key.size() + value.size();
+    _lru_index.insert({std::ref(key), std::ref(*new_node)});
+    _curr_size += node_size;
 
     return true;
 }
 
-bool SimpleLRU::pop(lru_node& node) {
+bool SimpleLRU::_push(lru_node& node) {
+    if (node.next) {
+        node.next->prev = node.prev;
+    }
+    else {
+        return true;
+    }
+
+    if (node.prev) {
+        node.prev->next.release();
+        node.prev->next = std::move(node.next);
+    }
+    else {
+        _lru_head.release();
+        _lru_head = std::move(node.next);
+    }
+
+    _lru_tail->next.reset(&node);
+    node.prev = _lru_tail;
+    node.next.release();
+    node.next.reset();
+    _lru_tail = &node;
+
+    return true;
+}
+
+bool SimpleLRU::_pop(lru_node& node) {
     _lru_index.erase(node.key);
     _curr_size -= node.key.size() + node.value.size();
 
     if (node.next) {
-        if (node.prev) {
-            node.next->prev = node.prev;
-        }
-        else {
-            node.next->prev = nullptr;
-        }
+        node.next->prev = node.prev;
     }
     else {
         _lru_tail = node.prev;
@@ -147,6 +177,15 @@ bool SimpleLRU::pop(lru_node& node) {
     
     return true;
 }
+
+// void SimpleLRU::_print_list() {
+//     auto curr = _lru_head.get();
+//     while (curr) {
+//         std::cout << curr->prev << ' ' << curr << ' ' << curr->next << std::endl;
+//         std::cout << curr->key << ' ' << curr->value << std::endl;
+//         curr = curr->next.get();
+//     }
+// }
 
 } // namespace Backend
 } // namespace Afina
